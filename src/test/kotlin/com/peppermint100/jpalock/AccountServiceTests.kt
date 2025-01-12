@@ -4,11 +4,14 @@ import com.peppermint100.jpalock.entity.Account
 import com.peppermint100.jpalock.repository.AccountRepository
 import com.peppermint100.jpalock.service.AccountService
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.junit.platform.commons.logging.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.dao.OptimisticLockingFailureException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
@@ -19,53 +22,60 @@ class AccountServiceTests {
     @Autowired private lateinit var accountService: AccountService
     @Autowired private lateinit var accountRepository: AccountRepository
 
-    @BeforeEach
-    fun setup() {
-        // 10000원 금액을 가지고 있는 계좌를 생성
-        val account = Account(balance = 10000)
-        accountRepository.save(account)
-    }
-
-    @AfterEach
-    fun tearDown() {
-        accountRepository.deleteAll()
-    }
-
-    /*
-    남은 금액: 8000
-    남은 금액: 8000
-    남은 금액: 8000
-    남은 금액: 8000
-    남은 금액: 8000
-    5개의 스레드에서 2000원 마이너스 한 값을 5번 업데이트하여 예상된 결과가 반환되지 않는다.
-     */
     @Test
-    fun `5개의 서로 다른 스레드에서 출금을 동시에 진행한다`() {
-        println("계좌를 가져옵니다.")
-        val accountId = accountRepository.findAll()[0].id!!
-        val numberOfThreads = 5
-        val executorService = Executors.newFixedThreadPool(32)
-        val latch = CountDownLatch(numberOfThreads)
+    fun `경쟁 상태로 인한 잔액 오류 테스트`() {
+        // 10000원이 있는 계좌 생성
+        val account = accountRepository.save(Account(balance = 10000))
+        val accountId = account.id!!
 
-        repeat(numberOfThreads) { index ->
-            executorService.submit {
-                try {
-                    println("계좌에서 2000원을 출금합니다.")
-                    val account = accountService.withdraw(accountId, 2000)
-                    println("남은 금액: ${account.getBalance()}")
-                } catch (e: Exception) {
-                    println("출금에 실패하였습니다.")
-                } finally {
-                    latch.countDown()
-                }
-            }
+        // Thread 1 - 계좌에 천원 추가
+        val thread1 = Thread {
+            val account = accountService.deposit(accountId, 1000)
+            println("Thread 1 잔액 ${account.getBalance()}")
         }
 
-        latch.await()
+        // Thread 2 - 계좌에 2천원 추가
+        val thread2 = Thread {
+            val account = accountService.deposit(accountId, 2000)
+            println("Thread 2 잔액 ${account.getBalance()}")
+        }
 
-        val finalAccount = accountRepository.findAccountById(accountId)!!
+        // Thread 1,2를 거의 동시에 실행하기
+        thread1.start()
+        thread2.start()
+        thread1.join()
+        thread2.join()
 
-        // 2000원씩 5번 출금하므로 남은 계좌의 잔액은 0원이다.
-        assertEquals(finalAccount.getBalance(), 0)
+        // 총 금액이 13000원이어야 하지만 사실상 Thread 2만 적용된 12000원이 된다
+        val updatedAccount = accountRepository.findAccountById(accountId)!!
+        println("최종 잔액: ${updatedAccount.getBalance()}")
+        assertEquals(13000, updatedAccount.getBalance())
+    }
+
+    @Test
+    fun `낙관적락 테스트`() {
+        // 10000원이 있는 계좌 생성
+        val account = accountRepository.save(Account(balance = 10000))
+        val accountId = account.id!!
+
+        val thread1 = Thread {
+            val account = accountService.depositWithOptimisticLock(accountId, 1000)
+            println("Thread 1 잔액 ${account.getBalance()}")
+        }
+
+        val thread2 = Thread {
+            val account = accountService.depositWithOptimisticLock(accountId, 1000)
+            println("Thread 2 잔액 ${account.getBalance()}")
+        }
+
+        thread1.start()
+        thread2.start()
+        thread1.join()
+        thread2.join()
+
+        // Thread 2는 낙관적 락에 의해 롤백되고 11000원만 적용된다.
+        val updatedAccount = accountRepository.findAccountById(accountId)!!
+        println("최종 잔액: ${updatedAccount.getBalance()}")
+        assertEquals(11000, updatedAccount.getBalance())
     }
 }

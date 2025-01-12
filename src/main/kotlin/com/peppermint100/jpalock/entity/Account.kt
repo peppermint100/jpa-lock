@@ -9,7 +9,10 @@ class Account(
         val id: Long? = null,
 
         @Column(name = "balance", nullable = false)
-        private var balance: Int = 0
+        private var balance: Int = 0,
+
+        @Version
+        var version: Long = 0
 ) {
 
     fun updateBalance(balance: Int) {
@@ -21,6 +24,6 @@ class Account(
     }
 
     fun isDrawable(balance: Int): Boolean {
-        return this.balance - balance > 0
+        return this.balance - balance >= 0
     }
 }
