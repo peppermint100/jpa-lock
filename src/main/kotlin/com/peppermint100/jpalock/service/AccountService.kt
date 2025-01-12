@@ -35,4 +35,11 @@ class AccountService(
         account.updateBalance(balance)
         return account
     }
+
+    @Transactional
+    fun depositWithPessimisticLock(accountId: Long, amount: Int): Account {
+        val account = accountRepository.findAccountByIdWithPessimisticLock(accountId) ?: throw IllegalStateException("존재하지 않는 계좌입니다.")
+        account.updateBalance(amount)
+        return account
+    }
 }
