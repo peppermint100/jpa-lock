@@ -3,7 +3,7 @@ spring:
     name: jpa-lock
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/lock_test?serverTimezone=UTC&characterEncoding=UTF-8
+    url: jdbc:mysql://localhost:3306/jpa_lock?serverTimezone=UTC&characterEncoding=UTF-8
     username: root
     password: root1234
   jpa:
